@@ -1,0 +1,216 @@
+@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css");
+
+:root {
+  --bg-color: #ffffff;
+  --text-color: #000000;
+  --placeholder-color: #929a9f;
+  --list-text-color: #929a9f; /* 프로젝트 리스트 기본 색상 (회색) */
+  --list-hover-color: #000000; /* 프로젝트 리스트 호버 색상 (검정색) */
+  --font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.description,
+.description *,
+.project-desc-inner,
+.project-desc-inner * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+body {
+  font-family: var(--font-family);
+  background-color: var(--bg-color);
+  color: var(--text-color);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.4;
+  letter-spacing: -0.03em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+}
+
+::selection {
+  background-color: #333333;
+  color: var(--bg-color);
+}
+::-moz-selection {
+  background-color: #333333;
+  color: var(--bg-color);
+}
+
+.grid-container {
+  display: flex;
+  height: 100vh;
+  padding: 24px 32px;
+}
+
+.col {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+/* Left Column */
+.left-col {
+  width: 400px;
+  margin-right: 32px;
+  flex-shrink: 0;
+  transition: all 0.5s cubic-bezier(0.25, 1, 0.5, 1);
+  overflow: hidden;
+  position: relative;
+}
+
+.title {
+  position: fixed;
+  top: 24px;
+  left: 32px;
+  z-index: 100;
+  font-size: 13px;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.title:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.description {
+  margin: auto 0;
+  width: 400px;
+  transition: opacity 0.3s ease;
+}
+
+.description p {
+  margin-bottom: 0px;
+  word-break: keep-all;
+}
+.description br {
+  display: block;
+  content: "";
+  margin-top: 10px;
+}
+
+.footer {
+  font-size: 8px;
+  position: fixed;
+  bottom: 24px;
+  left: 32px;
+  z-index: 100;
+  color: var(--text-color);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.footer:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Middle Column */
+.mid-col {
+  width: 250px;
+  flex-shrink: 0;
+  margin-right: 32px;
+  padding-top: 32px;
+  transition: all 0.5s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+/* Project Description Column */
+.project-desc-col {
+  width: 0px;
+  margin-right: 0px;
+  opacity: 0;
+  flex-shrink: 0;
+  transition: all 0.5s cubic-bezier(0.25, 1, 0.5, 1);
+  overflow: hidden;
+  padding-top: 32px;
+}
+
+.project-desc-inner {
+  width: 300px;
+}
+
+.project-list {
+  list-style: none;
+}
+
+.project-list li {
+  display: flex;
+  margin-bottom: 8px;
+  color: var(--list-text-color);
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.project-list li:hover {
+  color: var(--list-hover-color);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.project-list li.active {
+  color: var(--list-hover-color);
+}
+
+.p-title {
+  flex: 1;
+}
+
+.p-name {
+  width: 120px;
+  text-align: right;
+}
+
+/* Right Column */
+.right-col {
+  flex: 1;
+  height: 100%;
+  padding-top: 32px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* CLICK VIEW STATE */
+.grid-container.is-clicked .left-col {
+  width: 0px;
+  margin-right: 0px;
+  opacity: 0;
+}
+.grid-container.is-clicked .project-desc-col {
+  width: 300px;
+  margin-right: 32px;
+  opacity: 1;
+}
+
+.image-wrapper {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+}
+
+.image-placeholder {
+  width: 100%;
+  background-color: var(--placeholder-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  letter-spacing: 0.05em;
+}
