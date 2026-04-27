@@ -155,11 +155,12 @@
   // ===============================
   // Three.js Setup
   // ===============================
+  const appContainer = document.querySelector('.app-container');
   const canvas = document.getElementById('globe-canvas');
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(
     CONFIG.camera.fov,
-    window.innerWidth / window.innerHeight,
+    appContainer.clientWidth / appContainer.clientHeight,
     CONFIG.camera.near,
     CONFIG.camera.far
   );
@@ -170,7 +171,7 @@
     antialias: true,
     alpha: true,
   });
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setSize(appContainer.clientWidth, appContainer.clientHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
   // ===============================
@@ -183,13 +184,18 @@
   const TARGET_HFOV = 42; // degrees - fixed horizontal field of view
 
   function updateViewport() {
-    const aspect = window.innerWidth / window.innerHeight;
+    const w = appContainer.clientWidth;
+    const h = appContainer.clientHeight;
+    const aspect = w / h;
+    
     // Convert fixed horizontal FOV to vertical FOV based on current aspect ratio
     const hFovRad = TARGET_HFOV * Math.PI / 180;
     const vFovRad = 2 * Math.atan(Math.tan(hFovRad / 2) / aspect);
     camera.fov = vFovRad * 180 / Math.PI;
     camera.aspect = aspect;
     camera.updateProjectionMatrix();
+
+    renderer.setSize(w, h);
 
     // Globe scale stays 1.0 — no scaling needed since camera handles it
     globeGroup.scale.set(1, 1, 1);
@@ -200,7 +206,7 @@
     const offsetPx = (bottomHeight - headerHeight) / 2;
     const vFovRad2 = camera.fov * Math.PI / 180;
     const visibleHeight = 2 * Math.tan(vFovRad2 / 2) * CONFIG.camera.z;
-    const offsetWorld = (offsetPx / window.innerHeight) * visibleHeight;
+    const offsetWorld = (offsetPx / h) * visibleHeight;
     globeGroup.position.y = offsetWorld;
   }
   updateViewport();
@@ -241,10 +247,10 @@
       float facing = clamp((vFresnel + 1.0) * 0.5, 0.0, 1.0);
       // Apply curve so front stays crisp, fading is gradual
       float fadeCurve = pow(facing, 0.7);
-      // Alpha: back particles stay at ~15% opacity, front at full
-      float alpha = uBaseOpacity * mix(0.12, 1.0, fadeCurve);
-      // Color: back particles become light gray, front stays black
-      vec3 color = mix(vec3(0.82), uColor, fadeCurve);
+      // Alpha: back particles floor at 15% of base, front at 100%
+      float alpha = uBaseOpacity * mix(0.15, 1.0, fadeCurve);
+      // Color: back particles darker gray, front black
+      vec3 color = mix(vec3(0.5), uColor, fadeCurve);
       gl_FragColor = vec4(color, alpha);
     }
   `;
@@ -453,10 +459,10 @@
     const actionsEl = document.getElementById('introActions');
     const hintEl = document.getElementById('globeHint');
 
-    const newTitle = artwork.artist[currentLang] + ' · 2 0 2 6';
+    const newTitle = artwork.artist[currentLang] + ' · 2026';
     const newMainTitle = artwork.title[currentLang];
     const newText = artwork.description[currentLang];
-    const newHint = currentLang === 'ko' ? '찾 기 를  눌 러  위 치 로' : 'T A P   F I N D   T O   L O C A T I O N';
+    const newHint = currentLang === 'ko' ? '찾기를 눌러 위치로' : 'TAP FIND TO LOCATION';
 
     if (skipAnimation) {
       titleEl.textContent = newTitle;
@@ -519,7 +525,7 @@
     setTimeout(() => {
       titleEl.textContent = currentLang === 'ko' ? originalIntroTitleKo : originalIntroTitleEn;
       textEl.textContent = currentLang === 'ko' ? originalIntroTextKo : originalIntroTextEn;
-      hintEl.textContent = currentLang === 'ko' ? '구 를  돌 리 고  점 을  눌 러 보 세 요' : 'D R A G   S P H E R E   ·   T A P   A   D O T';
+      hintEl.textContent = currentLang === 'ko' ? '구를 돌리고 점을 눌러보세요' : 'DRAG SPHERE · TAP A DOT';
 
       mainTitleEl.style.display = 'none';
       actionsEl.style.display = 'none';
@@ -585,6 +591,7 @@
     if (Math.abs(deltaX) > 2 || Math.abs(deltaY) > 2) {
       dragMoved = true;
       // If we start moving while in detail mode, close it
+
       if (isArtworkDetailOpen) {
         closeArtworkDetail();
       }
@@ -630,19 +637,28 @@
   // ===============================
   const langToggle = document.getElementById('langToggle');
   langToggle.addEventListener('click', () => {
+    const nextLang = currentLang === 'ko' ? 'en' : 'ko';
+
+    // Update toggle UI immediately
+    document.querySelectorAll('.lang-option').forEach((el) => {
+      el.classList.toggle('active', el.dataset.lang === nextLang);
+    });
+    const slider = document.querySelector('.lang-slider');
+    if (slider) {
+      slider.style.transform = nextLang === 'en' ? 'translateX(26px)' : 'translateX(0)';
+    }
+
     // Start fade out transition
     document.body.classList.add('lang-transitioning');
 
     setTimeout(() => {
-      currentLang = currentLang === 'ko' ? 'en' : 'ko';
-
-      // Update toggle UI
-      document.querySelectorAll('.lang-option').forEach((el) => {
-        el.classList.toggle('active', el.dataset.lang === currentLang);
-      });
+      currentLang = nextLang;
 
       // Update all bilingual text (static HTML parts)
       document.querySelectorAll('[data-ko]').forEach((el) => {
+        // Skip globeHint if in artwork detail, as showArtworkInIntro handles it
+        if (el.id === 'globeHint' && isArtworkDetailOpen) return;
+
         const text = el.getAttribute(`data-${currentLang}`);
         if (text) {
           if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
@@ -668,7 +684,7 @@
 
       // End fade transition (fade back in)
       document.body.classList.remove('lang-transitioning');
-    }, 300);
+    }, 500);
   });
 
 
@@ -741,9 +757,9 @@
         dotIntroOpacity = Math.min(1, (elapsed - dotFadeStartTime) / FADE_DUR);
       }
 
-      // Opacity: edge/back=5%, front=100%
+      // Opacity: edge/back=0%, front=100%
       // Using power of 0.6 to provide a smooth, natural fade-out before hitting the edge
-      const targetOpacity = 0.05 + 0.95 * Math.pow(fadeCurve, 0.6);
+      const targetOpacity = Math.pow(fadeCurve, 0.6);
       mesh.material.opacity = targetOpacity * dotIntroOpacity;
       
       // Color: edge/back=light gray, front=black
@@ -791,8 +807,10 @@
         screenPos.copy(worldPos);
         screenPos.project(camera);
 
-        const x = (screenPos.x *  .5 + .5) * window.innerWidth;
-        const y = (screenPos.y * -.5 + .5) * window.innerHeight;
+        const w = appContainer.clientWidth;
+        const h = appContainer.clientHeight;
+        const x = (screenPos.x *  .5 + .5) * w;
+        const y = (screenPos.y * -.5 + .5) * h;
 
         labelObj.element.style.transform = `translate(-50%, 0) translate(${x}px, ${y + 10}px)`;
 
@@ -811,7 +829,6 @@
         }
 
         // Labels disappear at edge (NdotV=0) and are hidden on back
-        // Using power of 0.6 for a smooth fade matching the dots
         const labelAlpha = Math.max(0, Math.pow(Math.max(0, NdotV), 0.6)) * dotIntroOpacity;
         labelObj.element.style.opacity = labelAlpha.toFixed(2);
         labelObj.element.style.pointerEvents = labelAlpha > 0.3 ? 'auto' : 'none';

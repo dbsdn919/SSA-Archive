@@ -10,13 +10,15 @@
 </head>
 
 <body>
+  <div class="app-container">
 
   <!-- Header -->
   <header class="header" id="header">
-    <div class="logo">
+    <div class="logo" data-ko="장소 특정적 미술" data-en="Site-Specific Art">
       장소 특정적 미술
     </div>
     <div class="lang-toggle" id="langToggle">
+      <div class="lang-slider"></div>
       <span class="lang-option active" data-lang="ko">한</span>
       <span class="lang-option" data-lang="en">EN</span>
     </div>
@@ -28,10 +30,10 @@
     <div id="labels-container"></div>
     
     <div class="intro-section">
-      <p class="intro-section__title" id="introTitle" data-ko="전 시 · 2 0 2 6" data-en="E X H I B I T I O N · 2 0 2 6">전 시 · 2 0 2 6</p>
+      <p class="intro-section__title" id="introTitle" data-ko="전시 · 2026" data-en="EXHIBITION · 2026">전시 · 2026</p>
       <h2 class="intro-section__main-title" id="introMainTitle" style="display: none;"></h2>
-      <p class="intro-section__text" id="introText" data-ko="이 아카이브는 캠퍼스의 특정한 장소들에 깃든 시간과 흔적을 기록한 네 점의 작업을 모은다. 작품은 그 자리에 놓이는 것이 아니라, 그 자리에서 발생한다. 구를 돌려 작품을 둘러보고, 점을 눌러 각 작업의 설명을 읽어보세요." data-en="This archive collects four works that record the time and traces embedded in specific campus locations. The artwork is not placed there, but occurs there. Rotate the sphere to look around the works, and press the dots to read the description of each work.">
-        이 아카이브는 캠퍼스의 특정한 장소들에 깃든 시간과 흔적을 기록한 네 점의 작업을 모은다. 작품은 그 자리에 놓이는 것이 아니라, 그 자리에서 발생한다. 구를 돌려 작품을 둘러보고, 점을 눌러 각 작업의 설명을 읽어보세요.
+      <p class="intro-section__text" id="introText" data-ko="이 아카이브는 캠퍼스의 특정한 장소들에 깃든 시간과 흔적을 기록한 작업을 모은다. 작품은 그 자리에 놓이는 것이 아니라, 그 자리에서 발생한다. 구를 돌려 작품을 둘러보고, 점을 눌러 각 작업의 설명을 읽어보세요." data-en="This archive collects works that record the time and traces embedded in specific campus locations. The artwork is not placed there, but occurs there. Rotate the sphere to look around the works, and press the dots to read the description of each work.">
+        이 아카이브는 캠퍼스의 특정한 장소들에 깃든 시간과 흔적을 기록한 작업을 모은다. 작품은 그 자리에 놓이는 것이 아니라, 그 자리에서 발생한다. 구를 돌려 작품을 둘러보고, 점을 눌러 각 작업의 설명을 읽어보세요.
       </p>
       
       <div class="intro-actions" id="introActions" style="display: none;">
@@ -46,8 +48,8 @@
       </div>
     </div>
 
-    <div class="globe-hint" id="globeHint" data-ko="구 를  돌 리 고  점 을  눌 러 보 세 요" data-en="D R A G   S P H E R E   ·   T A P   A   D O T">
-      구 를  돌 리 고  점 을  눌 러 보 세 요
+    <div class="globe-hint" id="globeHint" data-ko="구를 돌리고 점을 눌러보세요" data-en="DRAG SPHERE · TAP A DOT">
+      구를 돌리고 점을 눌러보세요
     </div>
   </section>
 
@@ -65,6 +67,8 @@
   </div>
 
 
+
+  </div>
 
   <!-- Three.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
