@@ -16,7 +16,7 @@
       smallDotSize: 0.035,
       shellThickness: 0.2,
       artworkDotSize: 0.035,
-      rotationDamping: 0.92,
+      rotationDamping: 0.96, // Lower friction for longer glide
       autoRotateSpeed: 0.0015,
     },
     camera: {
@@ -28,13 +28,24 @@
     animation: {
       convergeDuration: 1200,
       expandDuration: 800,
+      introDelay: 500,
+      introDuration: 2000, // Extended for elegant deceleration
+      uiDelay: 700,
+      dotFadeDuration: 800
     },
   };
+
+  // Fallback to ensure app-ready is triggered if the intro animation stalls
+  const readyFallback = setTimeout(() => {
+    document.body.classList.add('app-ready');
+  }, 3000);
 
   let currentLang = 'ko';
   let isArtworkDetailOpen = false;
   let selectedArtworkIndex = -1;
   let isConverging = false;
+  let isFindMode = false;
+  let morphProgress = 0;
 
   // ===============================
   // Artwork Data
@@ -180,12 +191,21 @@
   const globeGroup = new THREE.Group();
   scene.add(globeGroup);
 
+  const smallDotsMeshes = [];
+  const artworkMeshes = [];
+  const labelElements = [];
+  const labelsContainer = document.getElementById('labels-container');
+
   // Fix horizontal FOV so globe always looks the same width relative to screen
   const TARGET_HFOV = 42; // degrees - fixed horizontal field of view
 
   function updateViewport() {
-    const w = appContainer.clientWidth;
-    const h = appContainer.clientHeight;
+    // Force container height to match actual window height to avoid mobile 100vh bug
+    appContainer.style.height = `${window.innerHeight}px`;
+
+    const rect = appContainer.getBoundingClientRect();
+    const w = rect.width;
+    const h = rect.height;
     const aspect = w / h;
     
     // Convert fixed horizontal FOV to vertical FOV based on current aspect ratio
@@ -197,12 +217,27 @@
 
     renderer.setSize(w, h);
 
+    // Calculate a scale factor based on container width (relative to 480px base)
+    const baseWidth = 480;
+    const appScale = w / baseWidth;
+    appContainer.style.setProperty('--app-scale', appScale);
+
+    // Proportionally scale dots so they always match the font size and globe size
+    const dotBaseSize = 8;
+    const dotPixelSize = dotBaseSize * appScale;
+    const vFovRad_val = camera.fov * Math.PI / 180;
+    const visibleHeight_val = 2 * Math.tan(vFovRad_val / 2) * CONFIG.camera.z;
+    const dotWorldScale = (dotPixelSize / h) * visibleHeight_val;
+    artworkMeshes.forEach(dot => {
+      dot.scale.set(dotWorldScale, dotWorldScale, 1);
+    });
+
     // Globe scale stays 1.0 — no scaling needed since camera handles it
     globeGroup.scale.set(1, 1, 1);
 
     // Position globe between header and bottom text
     const headerHeight = 60;
-    const bottomHeight = 280;
+    const bottomHeight = 220;
     const offsetPx = (bottomHeight - headerHeight) / 2;
     const vFovRad2 = camera.fov * Math.PI / 180;
     const visibleHeight = 2 * Math.tan(vFovRad2 / 2) * CONFIG.camera.z;
@@ -212,27 +247,37 @@
   updateViewport();
 
   // --- Small dots (sphere shell) ---
-  const smallDotsMeshes = [];
-  const sizes = [0.009, 0.014, 0.021];
+  // smallDotsMeshes already declared at top
+  const sizes = [0.01, 0.016, 0.023];
   const opacities = [0.4, 0.7, 0.9];
   const proportions = [0.6, 0.3, 0.1]; // Distribution of sizes
 
   // Custom vertex/fragment shaders for Fresnel edge-fading
   const particleVertexShader = `
+    attribute vec3 aTargetPosition;
+    uniform float uMorph;
     uniform float uPointSize;
+    uniform float uTime;
     varying float vFresnel;
+
     void main() {
-      // Surface normal for a sphere = normalized local position
+      // 1. Morph between sphere and center
+      vec3 pos = mix(position, vec3(0.0), uMorph);
+      
+      // 2. Add organic noise (GPU side for performance)
+      if (uMorph < 0.99) {
+        float phase = fract(sin(dot(position.xyz, vec3(12.9898, 78.233, 45.543))) * 43758.5453);
+        pos.x += sin(uTime * 1.2 + phase * 6.28) * 0.02 * (1.0 - uMorph);
+        pos.y += cos(uTime * 1.4 + phase * 6.28) * 0.02 * (1.0 - uMorph);
+        pos.z += sin(uTime * 1.0 + phase * 6.28) * 0.02 * (1.0 - uMorph);
+      }
+
       vec3 normal = normalize(position);
-      // Transform normal to world/view space
       vec3 worldNormal = normalize(normalMatrix * normal);
-      // View direction in view space
-      vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+      vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
       vec3 viewDir = normalize(-mvPosition.xyz);
-      // Fresnel: dot(viewDir, normal). 1 = facing camera, 0 = edge
-      float NdotV = dot(viewDir, worldNormal);
-      vFresnel = NdotV;
-      // Size attenuation - DPR independent (renderer handles pixel scaling)
+      vFresnel = dot(viewDir, worldNormal);
+      
       gl_PointSize = uPointSize * (1.0 / -mvPosition.z);
       gl_Position = projectionMatrix * mvPosition;
     }
@@ -240,16 +285,15 @@
   const particleFragmentShader = `
     uniform float uBaseOpacity;
     uniform vec3 uColor;
+    uniform float uMorph;
     varying float vFresnel;
     void main() {
-      // Remap NdotV from [-1, 1] to [0, 1]
-      // -1 = directly behind, 0 = edge, 1 = directly facing
       float facing = clamp((vFresnel + 1.0) * 0.5, 0.0, 1.0);
-      // Apply curve so front stays crisp, fading is gradual
       float fadeCurve = pow(facing, 0.7);
-      // Alpha: back particles floor at 15% of base, front at 100%
-      float alpha = uBaseOpacity * mix(0.15, 1.0, fadeCurve);
-      // Color: back particles darker gray, front black
+      
+      float morphFade = 1.0 - uMorph;
+      float alpha = uBaseOpacity * mix(0.15, 1.0, fadeCurve) * morphFade;
+      
       vec3 color = mix(vec3(0.5), uColor, fadeCurve);
       gl_FragColor = vec4(color, alpha);
     }
@@ -259,6 +303,7 @@
     const geometry = new THREE.BufferGeometry();
     const positions = [];
     const originals = [];
+    const targetPositions = [];
     const count = CONFIG.globe.smallDotCount * proportions[index];
 
     for (let i = 0; i < count; i++) {
@@ -270,15 +315,21 @@
       const z = r * Math.cos(phi);
       positions.push(x, y, z);
       originals.push(x, y, z);
+      
+      // Target: All points collapse to the center (0,0,0)
+      targetPositions.push(0, 0, 0);
     }
 
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute('aTargetPosition', new THREE.Float32BufferAttribute(targetPositions, 3));
 
     const material = new THREE.ShaderMaterial({
       uniforms: {
         uPointSize: { value: size * 800 },
         uBaseOpacity: { value: opacities[index] },
         uColor: { value: new THREE.Color(0x000000) },
+        uMorph: { value: 0.0 },
+        uTime: { value: 0.0 },
       },
       vertexShader: particleVertexShader,
       fragmentShader: particleFragmentShader,
@@ -305,11 +356,6 @@
   // --- Artwork dots (larger) ---
   const artworkGroup = new THREE.Group();
   globeGroup.add(artworkGroup);
-
-  const artworkMeshes = [];
-  const artworkRings = [];
-  const labelsContainer = document.getElementById('labels-container');
-  const labelElements = [];
 
   // Create a circle texture for artwork dot sprites
   const dotCanvas = document.createElement('canvas');
@@ -341,7 +387,12 @@
     dot.scale.set(dotScale, dotScale, 1);
     dot.position.copy(pos);
     const randomDelay = Math.random() * 1200; // Random delay up to 1.2s for staggering
-    dot.userData = { artworkIndex: index, originalPos: pos.clone(), introDelay: randomDelay };
+    dot.userData = { 
+      artworkIndex: index, 
+      originalPos: pos.clone(), 
+      introDelay: randomDelay,
+      originalLocalPos: pos.clone() // Store for collapse
+    };
 
     artworkGroup.add(dot);
     artworkMeshes.push(dot);
@@ -358,7 +409,6 @@
       }
     });
     
-    // Add touchstart to handle mobile properly
     label.addEventListener('touchstart', (e) => {
       e.stopPropagation();
       if (!isArtworkDetailOpen && !isConverging) {
@@ -393,7 +443,6 @@
       const artworkIndex = intersects[0].object.userData.artworkIndex;
       openArtworkDetail(artworkIndex);
     } else {
-      // If we clicked the globe but not a dot, close the detail
       if (isArtworkDetailOpen) {
         closeArtworkDetail();
       }
@@ -408,12 +457,10 @@
     rotationVelocity = { x: 0, y: 0 };
     lastInteractionTime = performance.now();
 
-    // Rotate globe so clicked dot faces camera
     const dot = artworkMeshes[index];
     const dotLocalPos = dot.position.clone().normalize();
     const dotWorldDir = dotLocalPos.clone().applyQuaternion(globeGroup.quaternion).normalize();
     
-    // Target direction: directly from globe center to camera
     const globeCenter = new THREE.Vector3();
     globeGroup.getWorldPosition(globeCenter);
     const targetDir = camera.position.clone().sub(globeCenter).normalize();
@@ -423,7 +470,7 @@
     const targetQuat = rotationQuat.multiply(startQuat);
 
     const rotateStartTime = performance.now();
-    const rotateDuration = 400;
+    const rotateDuration = 1000; // Balanced at 1 second
 
     isArtworkDetailOpen = true;
     showArtworkInIntro(index);
@@ -431,7 +478,9 @@
     function animateRotateToCenter(now) {
       const elapsed = now - rotateStartTime;
       const t = Math.min(elapsed / rotateDuration, 1);
-      const ease = 1 - Math.pow(1 - t, 3);
+      
+      // Power-4 Ease-Out: Smoother start than Expo-Out, very delicate end
+      const ease = 1 - Math.pow(1 - t, 4);
 
       globeGroup.quaternion.copy(startQuat).slerp(targetQuat, ease);
 
@@ -443,7 +492,6 @@
     requestAnimationFrame(animateRotateToCenter);
   }
 
-  // Store original intro text for restoring later
   const originalIntroTitle = document.querySelector('.intro-section__title').textContent;
   const originalIntroText = document.querySelector('.intro-section__text').textContent;
   const originalIntroTitleKo = document.querySelector('.intro-section__title').getAttribute('data-ko');
@@ -478,13 +526,11 @@
       return;
     }
 
-    // Fade out
     titleEl.style.opacity = '0';
     if (mainTitleEl.style.display === 'block') mainTitleEl.style.opacity = '0';
     textEl.style.opacity = '0';
     if (actionsEl.style.display === 'flex') actionsEl.style.opacity = '0';
 
-    // After fade out, swap text and fade in
     setTimeout(() => {
       titleEl.textContent = newTitle;
       mainTitleEl.textContent = newMainTitle;
@@ -494,7 +540,6 @@
       mainTitleEl.style.display = 'block';
       actionsEl.style.display = 'flex';
 
-      // We need a tiny delay before setting opacity to 1 so the display:block takes effect for transition
       requestAnimationFrame(() => {
         titleEl.style.opacity = '1';
         mainTitleEl.style.opacity = '1';
@@ -507,7 +552,7 @@
   function closeArtworkDetail() {
     isArtworkDetailOpen = false;
     selectedArtworkIndex = -1;
-    lastInteractionTime = performance.now(); // Reset auto-rotate timer
+    lastInteractionTime = performance.now();
 
     const titleEl = document.getElementById('introTitle');
     const mainTitleEl = document.getElementById('introMainTitle');
@@ -515,13 +560,11 @@
     const actionsEl = document.getElementById('introActions');
     const hintEl = document.getElementById('globeHint');
 
-    // Fade out
     titleEl.style.opacity = '0';
     mainTitleEl.style.opacity = '0';
     textEl.style.opacity = '0';
     actionsEl.style.opacity = '0';
 
-    // After fade out, restore original text and fade in
     setTimeout(() => {
       titleEl.textContent = currentLang === 'ko' ? originalIntroTitleKo : originalIntroTitleEn;
       textEl.textContent = currentLang === 'ko' ? originalIntroTextKo : originalIntroTextEn;
@@ -537,24 +580,20 @@
     }, 200);
   }
 
-
-
   document.getElementById('btnClose').addEventListener('click', (e) => {
     e.stopPropagation();
     closeArtworkDetail();
   });
 
-  // ===============================
-  // Drag Rotation (touch + mouse)
-  // ===============================
   let isDragging = false;
   let previousPosition = { x: 0, y: 0 };
   let rotationVelocity = { x: 0, y: 0 };
   let dragStartTime = 0;
   let dragMoved = false;
-  let lastInteractionTime = 0; // Track when user last touched the globe
-  const AUTO_ROTATE_PAUSE = 3000; // ms to wait before resuming auto-rotate
-  const AUTO_ROTATE_FADE_IN = 1000; // ms to fade auto-rotate back to full speed
+  let lastInteractionTime = 0;
+  const AUTO_ROTATE_PAUSE = 3000;
+  const AUTO_ROTATE_FADE_IN = 1000;
+  const appStartTime = performance.now();
 
   function getEventPos(e) {
     if (e.touches && e.touches.length > 0) {
@@ -564,8 +603,6 @@
   }
 
   function onPointerDown(e) {
-
-    // Check if touch/mouse actually hit the globe
     const rect = canvas.getBoundingClientRect();
     const pos = getEventPos(e);
     mouse.x = ((pos.x - rect.left) / rect.width) * 2 - 1;
@@ -573,7 +610,7 @@
     raycaster.setFromCamera(mouse, camera);
     
     const intersects = raycaster.intersectObject(hitSphere);
-    if (intersects.length === 0) return; // User clicked the background, ignore
+    if (intersects.length === 0) return; 
     
     isDragging = true;
     dragMoved = false;
@@ -590,37 +627,34 @@
 
     if (Math.abs(deltaX) > 2 || Math.abs(deltaY) > 2) {
       dragMoved = true;
-      // If we start moving while in detail mode, close it
-
       if (isArtworkDetailOpen) {
         closeArtworkDetail();
       }
     }
 
     const sensitivity = 0.005;
-    rotationVelocity.x = deltaY * sensitivity;
-    rotationVelocity.y = deltaX * sensitivity;
+    // Blend new velocity with old for smoother momentum capture
+    rotationVelocity.x = rotationVelocity.x * 0.5 + (deltaY * sensitivity) * 0.5;
+    rotationVelocity.y = rotationVelocity.y * 0.5 + (deltaX * sensitivity) * 0.5;
 
-    // Rotate around world axes to prevent unintuitive "backward" feeling when tilted
-    globeGroup.rotateOnWorldAxis(new THREE.Vector3(1, 0, 0), rotationVelocity.x);
-    globeGroup.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), rotationVelocity.y);
+    globeGroup.rotateOnWorldAxis(new THREE.Vector3(1, 0, 0), deltaY * sensitivity);
+    globeGroup.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), deltaX * sensitivity);
 
     previousPosition = pos;
   }
 
   function onPointerUp(e) {
     isDragging = false;
-    if (dragStartTime === 0) return; // Ignore if down event didn't start on canvas
+    if (dragStartTime === 0) return;
     
-    lastInteractionTime = performance.now(); // Record when user stopped
+    lastInteractionTime = performance.now();
     const elapsed = performance.now() - dragStartTime;
 
-    // Click detection: short tap without significant drag
     if (!dragMoved && elapsed < 300) {
       onArtworkClick(e);
     }
     
-    dragStartTime = 0; // Reset
+    dragStartTime = 0;
   }
 
   canvas.addEventListener('mousedown', onPointerDown);
@@ -632,14 +666,10 @@
   canvas.addEventListener('touchmove', onPointerMove, { passive: true });
   window.addEventListener('touchend', onPointerUp);
 
-  // ===============================
-  // Language Toggle
-  // ===============================
   const langToggle = document.getElementById('langToggle');
   langToggle.addEventListener('click', () => {
     const nextLang = currentLang === 'ko' ? 'en' : 'ko';
 
-    // Update toggle UI immediately
     document.querySelectorAll('.lang-option').forEach((el) => {
       el.classList.toggle('active', el.dataset.lang === nextLang);
     });
@@ -648,16 +678,13 @@
       slider.style.transform = nextLang === 'en' ? 'translateX(26px)' : 'translateX(0)';
     }
 
-    // Start fade out transition
     document.body.classList.add('lang-transitioning');
 
     setTimeout(() => {
       currentLang = nextLang;
 
-      // Update all bilingual text (static HTML parts)
       document.querySelectorAll('[data-ko]').forEach((el) => {
-        // Skip globeHint if in artwork detail, as showArtworkInIntro handles it
-        if (el.id === 'globeHint' && isArtworkDetailOpen) return;
+        if (el.classList.contains('logo') || (el.id === 'globeHint' && isArtworkDetailOpen)) return;
 
         const text = el.getAttribute(`data-${currentLang}`);
         if (text) {
@@ -669,30 +696,158 @@
         }
       });
 
-      // Update HTML lang attribute
+      document.querySelectorAll('.logo span').forEach(span => {
+        span.classList.toggle('active', span.dataset.lang === currentLang);
+      });
+
       document.documentElement.lang = currentLang === 'ko' ? 'ko' : 'en';
 
-      // Update DOM labels
       labelElements.forEach((labelObj, i) => {
         labelObj.element.textContent = artworks[i].artist[currentLang];
       });
 
-      // Update artwork detail if open
       if (isArtworkDetailOpen && selectedArtworkIndex >= 0) {
         showArtworkInIntro(selectedArtworkIndex, true);
       }
 
-      // End fade transition (fade back in)
       document.body.classList.remove('lang-transitioning');
-    }, 500);
+    }, 400);
   });
 
+  const btnFind = document.getElementById('btnFind');
+  const btnExitFind = document.getElementById('btnExitFind');
+  const findDistanceVal = document.getElementById('findDistanceVal');
+  const targetDot = document.getElementById('targetDot');
+  const findInfoArtist = document.getElementById('findInfoArtist');
+  const findInfoTitle = document.getElementById('findInfoTitle');
+  const findInfoLocation = document.getElementById('findInfoLocation');
 
+  function toggleFindMode(active) {
+    isFindMode = active;
+    
+    if (active && selectedArtworkIndex >= 0) {
+      const art = artworks[selectedArtworkIndex];
+      findInfoArtist.textContent = art.artist[currentLang] + ' · 2026';
+      findInfoTitle.textContent = art.title[currentLang];
+      findInfoLocation.textContent = art.location[currentLang];
+    }
 
-  // ===============================
-  // Render Loop
-  // ===============================
-  const appStartTime = performance.now();
+    const target = active ? 1 : 0;
+    const start = morphProgress;
+    const duration = 350; // Ultra-fast
+    const startTime = performance.now();
+
+    function animateMorph(now) {
+      const elapsed = now - startTime;
+      const t = Math.min(elapsed / duration, 1);
+      
+      // Apple-style Exponential easing
+      // Collapse: Expo In (Accelerate into center)
+      // Expand: Expo Out (Burst out from center)
+      const ease = active 
+        ? (t === 0 ? 0 : Math.pow(2, 10 * (t - 1))) 
+        : (t === 1 ? 1 : 1 - Math.pow(2, -10 * t));
+      
+      morphProgress = start + (target - start) * ease;
+      
+      smallDotsMeshes.forEach(mesh => {
+        mesh.material.uniforms.uMorph.value = morphProgress;
+      });
+
+      // Show UI at 95% collapse, hide UI at 5% expansion
+      if (active && t > 0.95 && !document.body.classList.contains('find-mode')) {
+        document.body.classList.add('find-mode');
+      } else if (!active && t > 0.05 && document.body.classList.contains('find-mode')) {
+        document.body.classList.remove('find-mode');
+      }
+
+      if (t < 1) requestAnimationFrame(animateMorph);
+    }
+    requestAnimationFrame(animateMorph);
+
+    if (active) {
+      resetRadarUI(); // Reset instantly to 0 before the overlay appears
+      setTimeout(startRadarSimulation, 750);
+    }
+  }
+
+  btnFind.addEventListener('click', () => toggleFindMode(true));
+  btnExitFind.addEventListener('click', () => toggleFindMode(false));
+
+  let radarInterval;
+  
+  // New helper to reset visuals instantly
+  function resetRadarUI() {
+    if (radarInterval) clearInterval(radarInterval);
+    const targetDist = selectedArtworkIndex >= 0 ? (100 + (selectedArtworkIndex * 47) % 300) : 139;
+    const numDigits = targetDist >= 100 ? 3 : 2;
+    const slots = findDistanceVal.querySelectorAll('.digit-slot');
+    const columns = findDistanceVal.querySelectorAll('.digit-column');
+
+    slots.forEach((slot, i) => {
+      if (i < (3 - numDigits)) {
+        slot.style.display = 'none';
+      } else {
+        slot.style.display = 'block';
+        slot.style.opacity = '1';
+        columns[i].style.transition = 'none';
+        columns[i].style.transform = 'translateY(0)';
+        void columns[i].offsetHeight;
+        columns[i].style.transition = 'transform 0.1s ease-out';
+      }
+    });
+    return targetDist;
+  }
+
+  function startRadarSimulation() {
+    const targetDist = resetRadarUI(); // Reset again just in case, and get target
+    let currentDist = 0;   
+    let angle = 0;
+    const numDigits = targetDist >= 100 ? 3 : 2;
+    const columns = findDistanceVal.querySelectorAll('.digit-column');
+
+    radarInterval = setInterval(() => {
+      if (!isFindMode) {
+        clearInterval(radarInterval);
+        return;
+      }
+      
+      // Fast count-up at start
+      if (currentDist < targetDist) {
+        const step = Math.ceil((targetDist - currentDist) * 0.15) + 1;
+        currentDist += step;
+        if (currentDist > targetDist) currentDist = targetDist;
+      } else {
+        // Slow jitter once reached
+        currentDist = Math.max(1, currentDist - 0.1 + (Math.random() - 0.5) * 0.1);
+      }
+      
+      angle += 2;
+      
+      const distInt = Math.floor(currentDist);
+      const distStr = distInt.toString().padStart(numDigits, '0');
+      
+      // Map distStr to the visible slots
+      const strChars = distStr.split('');
+      const slotOffset = 3 - numDigits;
+      
+      strChars.forEach((char, i) => {
+        const columnIndex = i + slotOffset;
+        const digit = parseInt(char);
+        const isMobile = window.innerWidth < 480;
+        const h = isMobile ? (window.innerWidth * 0.18) : 84;
+        columns[columnIndex].style.transform = `translateY(${-digit * h}px)`;
+      });
+      
+      const ring = targetDot.parentElement;
+      ring.style.transform = `rotate(${angle}deg)`;
+    }, 60); 
+  }
+
+  // Pre-allocate vectors to reuse in animate loop (Prevents GC)
+  const _v1 = new THREE.Vector3();
+  const _v2 = new THREE.Vector3();
+  const _v3 = new THREE.Vector3();
 
   function animate() {
     requestAnimationFrame(animate);
@@ -701,30 +856,31 @@
     const time = now * 0.001;
     const elapsed = now - appStartTime;
 
-    // Intro animation calculations
-    const INTRO_DELAY = 1000; // 1 second delay before spreading
-    const INTRO_DUR = 2000; // 2 seconds for particles to form
-    const FADE_DUR = 1500;  // 1.5 seconds for artwork to fade in
+    const anim = CONFIG.animation;
     
     let introProgress = 0;
-    if (elapsed > INTRO_DELAY) {
-      introProgress = Math.min(1, (elapsed - INTRO_DELAY) / INTRO_DUR);
+    if (elapsed > anim.introDelay) {
+      introProgress = Math.min(1, (elapsed - anim.introDelay) / anim.introDuration);
     }
-    const spreadEase = 1 - Math.pow(1 - introProgress, 4); // Quartic ease out
-    const baseFadeStartTime = INTRO_DELAY + INTRO_DUR - 500; // Base time when fading starts
+    // Apple-style Exponential Out: Extremely fast burst, then infinitely smooth settle
+    const spreadEase = introProgress === 1 ? 1 : 1 - Math.pow(2, -10 * introProgress);
+    
+    // UI Ready and Dot Fade Timings
+    if (elapsed > anim.uiDelay && !document.body.classList.contains('app-ready')) {
+      document.body.classList.add('app-ready');
+    }
+    // Start showing dots when the globe is about 85% spread out for a layered feel
+    const dotFadeStartBase = anim.introDelay + (anim.introDuration * 0.4);
 
-    // Auto-rotate with pause after user interaction
+    // 1. Globe Rotation
     if (!isDragging && !isArtworkDetailOpen && !isConverging) {
       const timeSinceInteraction = now - lastInteractionTime;
       if (timeSinceInteraction > AUTO_ROTATE_PAUSE) {
-        // Gradually fade auto-rotation back in
         const fadeProgress = Math.min(1, (timeSinceInteraction - AUTO_ROTATE_PAUSE) / AUTO_ROTATE_FADE_IN);
-        const currentSpeed = CONFIG.globe.autoRotateSpeed * fadeProgress;
-        globeGroup.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), currentSpeed);
+        globeGroup.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), CONFIG.globe.autoRotateSpeed * fadeProgress);
       }
     }
 
-    // Inertia damping
     if (!isDragging) {
       rotationVelocity.x *= CONFIG.globe.rotationDamping;
       rotationVelocity.y *= CONFIG.globe.rotationDamping;
@@ -732,104 +888,67 @@
       globeGroup.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), rotationVelocity.y);
     }
 
-    // Subtle breathing + fog-like fading for artwork dots
-    const camPos3 = camera.position.clone();
-    const globeCenter3 = new THREE.Vector3();
-    globeGroup.getWorldPosition(globeCenter3);
+    // 2. Update Small Particles (GPU Side)
+    smallDotsMeshes.forEach((mesh) => {
+      const uniforms = mesh.material.uniforms;
+      uniforms.uTime.value = time;
+      
+      // Handle visibility and spread using uMorph
+      if (!isFindMode) {
+        uniforms.uMorph.value = 1.0 - spreadEase;
+        // Snappier opacity fade matching the quintic motion
+        const opacityMult = introProgress < 1 ? (0.3 + Math.pow(introProgress, 0.4) * 0.7) : 1.0;
+        uniforms.uBaseOpacity.value = mesh.userData.baseOpacity * opacityMult;
+      }
+    });
+
+    // 3. Update Artworks & Labels
+    const camPos = camera.position;
+    const globeCenter = _v1.set(0, 0, 0);
+    globeGroup.getWorldPosition(globeCenter);
 
     artworkMeshes.forEach((mesh, i) => {
+      const findModeOffset = 1.0 - morphProgress;
       const baseScale = CONFIG.globe.artworkDotSize * 3;
-      mesh.scale.set(baseScale, baseScale, 1);
-
-      // Fog-like fading (same formula as particle shader and labels)
-      const wp = new THREE.Vector3();
-      mesh.getWorldPosition(wp);
-      const viewDir = camPos3.clone().sub(wp).normalize();
-      const surfNormal = wp.clone().sub(globeCenter3).normalize();
-      const NdotV = viewDir.dot(surfNormal); // [-1, 1]
-      // Fade out sharply as it approaches the edge (NdotV = 0)
-      const fadeCurve = Math.max(0, NdotV);
-
-      // Calculate this dot's specific intro opacity
-      const dotFadeStartTime = baseFadeStartTime + mesh.userData.introDelay;
-      let dotIntroOpacity = 0;
-      if (elapsed > dotFadeStartTime) {
-        dotIntroOpacity = Math.min(1, (elapsed - dotFadeStartTime) / FADE_DUR);
+      mesh.scale.set(baseScale * findModeOffset, baseScale * findModeOffset, 1);
+      
+      if (mesh.userData.originalLocalPos) {
+        mesh.position.copy(mesh.userData.originalLocalPos).multiplyScalar(findModeOffset);
       }
 
-      // Opacity: edge/back=0%, front=100%
-      // Using power of 0.6 to provide a smooth, natural fade-out before hitting the edge
+      mesh.getWorldPosition(_v2);
+      _v3.copy(camPos).sub(_v2).normalize(); // View Direction
+      const surfNormal = _v2.clone().sub(globeCenter).normalize();
+      const NdotV = _v3.dot(surfNormal);
+
+      // Intro fading logic
+      const specificDotFadeStart = dotFadeStartBase + mesh.userData.introDelay;
+      let dotIntroOpacity = 0;
+      if (elapsed > specificDotFadeStart) {
+        dotIntroOpacity = Math.min(1, (elapsed - specificDotFadeStart) / anim.dotFadeDuration);
+      }
+
+      const fadeCurve = Math.max(0, NdotV);
       const targetOpacity = Math.pow(fadeCurve, 0.6);
       mesh.material.opacity = targetOpacity * dotIntroOpacity;
       
-      // Color: edge/back=light gray, front=black
-      const gray = 0.85 * (1 - Math.pow(fadeCurve, 0.6));
+      const gray = 0.85 * (1 - targetOpacity);
       mesh.material.color.setRGB(gray, gray, gray);
-    });
 
-    // Organic Brownian motion for all small particles
-    if (!isConverging) {
-      smallDotsMeshes.forEach((mesh) => {
-        // Fade in particles as they spread out (invisible before delay)
-        const particleOpacityMult = introProgress < 1 ? Math.pow(introProgress, 0.5) : 1.0;
-        mesh.material.uniforms.uBaseOpacity.value = mesh.userData.baseOpacity * particleOpacityMult;
+      // Label positioning
+      const labelObj = labelElements[i];
+      if (!isConverging && !isFindMode) {
+        _v2.project(camera);
+        const rect = appContainer.getBoundingClientRect();
+        const x = (_v2.x * 0.5 + 0.5) * rect.width;
+        const y = (_v2.y * -0.5 + 0.5) * rect.height;
+        const appScale = rect.width / 480;
 
-        const positions = mesh.geometry.attributes.position.array;
-        const originals = mesh.userData.originals;
-        for (let i = 0; i < positions.length; i += 3) {
-          const phase = i * 0.01;
-          const targetX = originals[i];
-          const targetY = originals[i + 1];
-          const targetZ = originals[i + 2];
-          
-          positions[i] = targetX * spreadEase + Math.sin(time * 1.2 + phase) * 0.03;
-          positions[i + 1] = targetY * spreadEase + Math.cos(time * 1.4 + phase) * 0.03;
-          positions[i + 2] = targetZ * spreadEase + Math.sin(time * 1.0 - phase) * 0.03;
-        }
-        mesh.geometry.attributes.position.needsUpdate = true;
-      });
-    }
-
-    // Update DOM labels positions
-    const halfWidth = window.innerWidth / 2;
-    const halfHeight = window.innerHeight / 2;
-    
-    labelElements.forEach((labelObj, i) => {
-      const mesh = artworkMeshes[i];
-      const worldPos = new THREE.Vector3();
-      mesh.getWorldPosition(worldPos);
-      
-      const isHidden = isConverging;
-      
-      if (!isHidden) {
-        // Project to screen
-        const screenPos = new THREE.Vector3();
-        screenPos.copy(worldPos);
-        screenPos.project(camera);
-
-        const w = appContainer.clientWidth;
-        const h = appContainer.clientHeight;
-        const x = (screenPos.x *  .5 + .5) * w;
-        const y = (screenPos.y * -.5 + .5) * h;
-
-        labelObj.element.style.transform = `translate(-50%, 0) translate(${x}px, ${y + 10}px)`;
-
-        // Fog-like label fading matching the particle shader
-        const camPos = camera.position.clone();
-        const viewDir = camPos.sub(worldPos).normalize();
-        const globeCenter = new THREE.Vector3();
-        globeGroup.getWorldPosition(globeCenter);
-        const surfaceNormal = worldPos.clone().sub(globeCenter).normalize();
-        const NdotV = viewDir.dot(surfaceNormal); // range [-1, 1]
-        const dot = artworkMeshes[i];
-        const dotFadeStartTime = baseFadeStartTime + dot.userData.introDelay;
-        let dotIntroOpacity = 0;
-        if (elapsed > dotFadeStartTime) {
-          dotIntroOpacity = Math.min(1, (elapsed - dotFadeStartTime) / FADE_DUR);
-        }
-
-        // Labels disappear at edge (NdotV=0) and are hidden on back
-        const labelAlpha = Math.max(0, Math.pow(Math.max(0, NdotV), 0.6)) * dotIntroOpacity;
+        labelObj.element.style.left = `${x.toFixed(1)}px`;
+        labelObj.element.style.top = `${y.toFixed(1)}px`;
+        labelObj.element.style.transform = `translate(-50%, ${(12 * appScale).toFixed(1)}px)`;
+        
+        const labelAlpha = targetOpacity * dotIntroOpacity;
         labelObj.element.style.opacity = labelAlpha.toFixed(2);
         labelObj.element.style.pointerEvents = labelAlpha > 0.3 ? 'auto' : 'none';
       } else {
@@ -848,7 +967,6 @@
   // ===============================
   window.addEventListener('resize', () => {
     updateViewport();
-    renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   });
 })();

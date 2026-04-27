@@ -14,8 +14,9 @@
 
   <!-- Header -->
   <header class="header" id="header">
-    <div class="logo" data-ko="장소 특정적 미술" data-en="Site-Specific Art">
-      장소 특정적 미술
+    <div class="logo">
+      <span class="logo-ko active" data-lang="ko">장소 특정적 미술</span>
+      <span class="logo-en" data-lang="en">Site-Specific Art</span>
     </div>
     <div class="lang-toggle" id="langToggle">
       <div class="lang-slider"></div>
@@ -63,6 +64,51 @@
       <div class="artwork-detail__location" id="artworkLocation"></div>
       <br><br>
       <button class="artwork-detail__close" id="artworkClose" data-ko="돌아가기" data-en="Go Back">돌아가기</button>
+    </div>
+  </div>
+
+  <!-- Find My Mode Overlay -->
+  <div class="find-overlay" id="findOverlay">
+    <!-- Find Header -->
+    <div class="find-header">
+      <div class="btn-back-find" id="btnExitFind">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="19" y1="12" x2="5" y2="12"></line>
+          <polyline points="12 19 5 12 12 5"></polyline>
+        </svg>
+        <span class="status-text" data-ko="찾는 중" data-en="Finding...">찾는 중</span>
+      </div>
+    </div>
+
+    <!-- Center Radar -->
+    <div class="find-radar-container">
+      <div class="find-radar-rings">
+        <div class="radar-ring ring-1"></div>
+        <div class="radar-ring ring-2"></div>
+        <div class="radar-ring ring-3">
+          <div class="target-dot" id="targetDot"></div>
+        </div>
+      </div>
+      <div class="find-distance-center">
+        <div class="distance-value" id="findDistanceVal">
+          <div class="digit-slot"><div class="digit-column"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span></div></div>
+          <div class="digit-slot"><div class="digit-column"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span></div></div>
+          <div class="digit-slot"><div class="digit-column"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span></div></div>
+        </div>
+        <div class="distance-unit" data-ko="미터" data-en="meters">미터</div>
+      </div>
+    </div>
+
+    <!-- Bottom Info -->
+    <div class="find-bottom-info">
+      <div class="info-artist" id="findInfoArtist">전종우 · 2026</div>
+      <div class="info-title" id="findInfoTitle">Echo of Stairs</div>
+      <div class="info-location" id="findInfoLocation">예술대학 B동 계단실</div>
+    </div>
+
+    <!-- Footer Hint -->
+    <div class="find-footer-hint" data-ko="화살표를 따라 걸어가세요" data-en="Follow the arrow to walk">
+      화살표를 따라 걸어가세요
     </div>
   </div>
 
